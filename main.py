@@ -1,21 +1,30 @@
 import os
 import time
 import requests
+import json
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+# File to store history
+HISTORY_FILE = 'posted_history.json'
+
+def load_history():
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE, 'r') as f:
+            return json.load(f)
+    return []
+
+def save_history(history):
+    with open(HISTORY_FILE, 'w') as f:
+        json.dump(history, f, indent=4)
+
 def get_news_articles():
-    """Fetches top headlines from NewsAPI."""
     news_api_key = os.environ.get('NEWS_API_KEY')
     if not news_api_key:
-        print("⚠️ No NEWS_API_KEY found. Using dummy data for testing.")
-        return [
-            {"title": "Test Article 1", "content": "This is a test post to verify the Blogger bot."},
-            {"title": "Test Article 2", "content": "Another test post confirming the loop works."}
-        ]
+        return []
 
-    print("Fetching latest news from News API...")
+    print("Fetching latest news...")
     url = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={news_api_key}"
     
     try:
@@ -24,13 +33,10 @@ def get_news_articles():
         data = response.json()
         
         articles = []
-        # Grab the top 5 articles to prevent overloading the blog
         for item in data.get('articles', [])[:5]:
-            # Skip articles that were removed or are missing content
-            if item['title'] == '[Removed]' or not item['content']:
+            if item['title'] == '[Removed]' or not item['content'] or not item['url']:
                 continue
                 
-            # Format the content nicely for Blogger
             html_content = f"""
             <p><i>Source: {item['source']['name']}</i></p>
             <p>{item['description'] or ''}</p>
@@ -40,81 +46,60 @@ def get_news_articles():
             
             articles.append({
                 "title": item['title'],
-                "content": html_content
+                "content": html_content,
+                "url": item['url'] # We track the URL to prevent duplicates
             })
-            
-        print(f"Successfully fetched {len(articles)} articles.")
         return articles
-        
     except Exception as e:
         print(f"❌ Failed to fetch news: {e}")
         return []
 
 def main():
-    # 1. Load Credentials from GitHub Secrets
     CLIENT_ID = os.environ.get('CLIENT_ID')
     CLIENT_SECRET = os.environ.get('CLIENT_SECRET')
     REFRESH_TOKEN = os.environ.get('REFRESH_TOKEN')
-    
-    # Get Blogger IDs and clean up any spaces
     raw_blogger_ids = os.environ.get('BLOGGER_IDS', '')
     BLOGGER_IDS = [b_id.strip() for b_id in raw_blogger_ids.split(',') if b_id.strip()]
 
-    if not all([CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN, BLOGGER_IDS]):
-        print("❌ CRITICAL ERROR: Missing one or more environment variables.")
-        return
+    # Load history
+    posted_history = load_history()
 
-    # 2. Authenticate with Google
-    print("Authenticating with Google Blogger API...")
     creds = Credentials(
-        token=None,
-        refresh_token=REFRESH_TOKEN,
+        token=None, refresh_token=REFRESH_TOKEN,
         token_uri='https://oauth2.googleapis.com/token',
-        client_id=CLIENT_ID,
-        client_secret=CLIENT_SECRET
+        client_id=CLIENT_ID, client_secret=CLIENT_SECRET
     )
-
     service = build('blogger', 'v3', credentials=creds)
 
-    # 3. Get the Content
     news_articles = get_news_articles()
     
     if not news_articles:
-        print("No articles to post today. Exiting.")
+        print("No new articles to post.")
         return
 
-    # 4. The Safe Posting Loop (Prevents Error 429)
     for blog_id in BLOGGER_IDS:
-        print(f"\n--- Starting posts for Blog ID: {blog_id} ---")
-        
+        print(f"\n--- Checking Blog: {blog_id} ---")
         for article in news_articles:
-            body = {
-                "title": article['title'],
-                "content": article['content']
-            }
+            # DEDUPLICATION CHECK
+            if article['url'] in posted_history:
+                print(f"Skipping (Already Posted): {article['title']}")
+                continue
+            
+            body = {"title": article['title'], "content": article['content']}
             
             try:
-                # Send the post to Blogger
-                request = service.posts().insert(blogId=blog_id, body=body, isDraft=False)
-                response = request.execute()
-                print(f"✅ Successfully posted: {article['title']}")
+                service.posts().insert(blogId=blog_id, body=body, isDraft=False).execute()
+                print(f"✅ Posted: {article['title']}")
                 
-                # Wait 15 seconds before the next post
+                # Add to history and save
+                posted_history.append(article['url'])
+                save_history(posted_history)
+                
                 time.sleep(15)
-                
             except HttpError as error:
-                print(f"❌ Error posting '{article['title']}' to {blog_id}: {error}")
-                
-                # If we hit a rate limit, pause for 60 seconds
+                print(f"❌ Error: {error}")
                 if error.resp.status == 429:
-                    print("⚠️ Hit a rate limit! Pausing for 60 seconds...")
                     time.sleep(60)
-                # If it's a 403 or 401, the token/permissions are wrong
-                elif error.resp.status in [401, 403]:
-                    print("⚠️ Authentication/Permission error. Stopping this blog.")
-                    break # Stop trying to post to this specific blog
-
-    print("\n🎉 All automation tasks completed successfully!")
 
 if __name__ == '__main__':
     main()
