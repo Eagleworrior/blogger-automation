@@ -2,13 +2,15 @@ name: Blogger Automation
 
 on:
   schedule:
-    # Runs at 09:00 UTC every day
-    - cron: '0 9 * * *'
-  workflow_dispatch: # Allows you to run it manually
+    # Runs at the start of every hour (e.g., 1:00, 2:00, 3:00 UTC)
+    - cron: '0 * * * *'
+  workflow_dispatch: # Allows you to run it manually when you want
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required to allow the bot to update posted_history.json
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
