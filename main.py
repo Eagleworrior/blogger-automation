@@ -1,58 +1,68 @@
 import os
-import json
-import requests
+import time
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
-# --- CONFIGURATION ---
-BLOGGER_IDS = os.environ.get('BLOGGER_IDS').split(',')
-NEWS_API_KEY = os.environ.get('NEWS_API_KEY')
-HISTORY_FILE = 'posted_history.json'
+# 1. Load Credentials from GitHub Secrets
+CLIENT_ID = os.environ.get('CLIENT_ID')
+CLIENT_SECRET = os.environ.get('CLIENT_SECRET')
+REFRESH_TOKEN = os.environ.get('REFRESH_TOKEN')
+BLOGGER_IDS = os.environ.get('BLOGGER_IDS').split(',') # Assuming comma-separated IDs
 
-# --- AUTH ---
+# 2. Authenticate with Google
 creds = Credentials(
-    None,
-    refresh_token=os.environ.get('REFRESH_TOKEN'),
-    client_id=os.environ.get('CLIENT_ID'),
-    client_secret=os.environ.get('CLIENT_SECRET'),
-    token_uri="https://oauth2.googleapis.com/token"
+    token=None,
+    refresh_token=REFRESH_TOKEN,
+    token_uri='https://oauth2.googleapis.com/token',
+    client_id=CLIENT_ID,
+    client_secret=CLIENT_SECRET
 )
-blogger = build('blogger', 'v3', credentials=creds)
 
-def get_posted_history():
-    if os.path.exists(HISTORY_FILE):
-        with open(HISTORY_FILE, 'r') as f: return json.load(f)
-    return []
+service = build('blogger', 'v3', credentials=creds)
 
-def save_posted_history(history):
-    with open(HISTORY_FILE, 'w') as f: json.dump(history, f)
+# ---------------------------------------------------------
+# 3. YOUR NEWS GATHERING CODE GOES HERE
+# (Fetch from News API, format the text, etc.)
+# 
+# For this example, let's assume you have a list of 
+# dictionary items called 'news_articles'
+# ---------------------------------------------------------
 
-def fetch_news():
-    url = f"https://newsdata.io/api/1/latest?apikey={NEWS_API_KEY}&language=en&category=technology"
-    response = requests.get(url).json()
-    return response.get('results', [])
+news_articles = [
+    {"title": "Breaking News 1", "content": "Full article text here..."},
+    {"title": "Breaking News 2", "content": "Full article text here..."},
+    # ... more articles
+]
 
-def post_to_blogger(blog_id, item):
-    body = {'title': item['title'], 'content': f"{item.get('description', '')} <br><br> Read more: {item['link']}"}
-    blogger.posts().insert(blogId=blog_id, body=body).execute()
-
-# --- MAIN LOGIC ---
-history = get_posted_history()
-news_items = fetch_news()
-
-# Filter: Only keep news we haven't posted yet
-new_news = [n for n in news_items if n['link'] not in history]
-
-# Post 5 items per blog (if available)
+# 4. The Safe Posting Loop (Prevents Error 429)
 for blog_id in BLOGGER_IDS:
-    count = 0
-    for item in new_news:
-        if count >= 5: break
+    blog_id = blog_id.strip() # Clean up any accidental spaces
+    print(f"Starting to post to Blog ID: {blog_id}")
+    
+    for article in news_articles:
+        body = {
+            "title": article['title'],
+            "content": article['content']
+        }
+        
         try:
-            post_to_blogger(blog_id, item)
-            history.append(item['link'])
-            count += 1
-        except Exception as e:
-            print(f"Error posting to {blog_id}: {e}")
+            # Send the post to Blogger
+            request = service.posts().insert(blogId=blog_id, body=body, isDraft=False)
+            response = request.execute()
+            print(f"✅ Successfully posted: {article['title']}")
+            
+            # --- THE CRITICAL DELAY ---
+            # Wait 15 seconds before the next post to prevent the 429 Quota Error
+            print("Taking a 15-second break to respect Google API limits...")
+            time.sleep(15)
+            
+        except HttpError as error:
+            print(f"❌ Error posting to {blog_id}: {error}")
+            
+            # If we STILL hit a rate limit, wait a full minute before trying the next one
+            if error.resp.status == 429:
+                print("Hit a rate limit! Pausing for 60 seconds...")
+                time.sleep(60)
 
-save_posted_history(history)
+print("All posting tasks completed!")
