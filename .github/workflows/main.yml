@@ -2,15 +2,15 @@ name: Blogger Automation
 
 on:
   schedule:
-    # Runs at the start of every hour (e.g., 1:00, 2:00, 3:00 UTC)
-    - cron: '0 * * * *'
-  workflow_dispatch: # Allows you to run it manually when you want
+    # This runs at the 0th minute, every 2 hours
+    - cron: '0 */2 * * *'
+  workflow_dispatch: 
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Required to allow the bot to update posted_history.json
+      contents: write 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -36,10 +36,10 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git add posted_history.json
+          git add posted_history.json blog_index.json
           # Check if there are changes to commit
           if ! git diff --staged --quiet; then
-            git commit -m "Update posted history"
+            git commit -m "Update rotation index and history"
             git push
           else
             echo "No changes to commit. Skipping git push."
