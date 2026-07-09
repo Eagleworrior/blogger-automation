@@ -6,7 +6,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-INDEX_FILE = 'blog_index.json'
+# We only need the history file now, no more index file!
 HISTORY_FILE = 'posted_history.json'
 
 def load_history():
@@ -18,27 +18,6 @@ def load_history():
 def save_history(history):
     with open(HISTORY_FILE, 'w') as f:
         json.dump(history, f, indent=4)
-
-def get_next_blog(blogger_ids):
-    # Load which blog we posted to last
-    if os.path.exists(INDEX_FILE):
-        with open(INDEX_FILE, 'r') as f:
-            try:
-                data = json.load(f)
-                index = data.get('index', 0)
-            except:
-                index = 0
-    else:
-        index = 0
-    
-    # Calculate next index for the NEXT run
-    next_index = (index + 1) % len(blogger_ids)
-    
-    # Save the index for the next run to read
-    with open(INDEX_FILE, 'w') as f:
-        json.dump({'index': next_index}, f)
-        
-    return blogger_ids[index]
 
 def get_news_articles():
     news_api_key = os.environ.get('NEWS_API_KEY')
@@ -55,9 +34,9 @@ def get_news_articles():
         data = response.json()
         articles = []
         
-        # Grab up to 2 articles to keep the script running fast
-        for item in data.get('articles', [])[:2]: 
-            if item['title'] == '[Removed]' or not item['content'] or not item['url']:
+        # Grab up to 10 articles for your daily run
+        for item in data.get('articles', [])[:10]: 
+            if item.get('title') == '[Removed]' or not item.get('content') or not item.get('url'):
                 continue
                 
             html_content = f"""
@@ -85,15 +64,15 @@ def main():
     
     BLOGGER_IDS = [b_id.strip() for b_id in raw_blogger_ids.split(',') if b_id.strip()]
 
-    if not all([CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN, BLOGGER_IDS]):
+    if not all([CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN]) or not BLOGGER_IDS:
         print("❌ CRITICAL ERROR: Missing one or more environment variables.")
         return
 
-    # 1. Determine which specific blog to target during this 2-hour window
-    target_blog = get_next_blog(BLOGGER_IDS)
-    print(f"🎯 Target blog for this execution window: {target_blog}")
+    # 1. Target the exact blog from your GitHub Secrets
+    target_blog = BLOGGER_IDS[0]
+    print(f"🎯 Target blog for this execution: {target_blog}")
 
-    # 2. Load posted URLs log
+    # 2. Load posted URLs log so we don't post duplicates
     posted_history = load_history()
 
     # 3. Authenticate with Google Blogger
@@ -128,7 +107,7 @@ def main():
             posted_history.append(unique_post_id)
             save_history(posted_history)
             
-            # Tiny safety delay between the two articles, but no big delays!
+            # Tiny safety delay between the articles
             time.sleep(5)
             
         except HttpError as error:
