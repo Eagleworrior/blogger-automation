@@ -11,8 +11,13 @@ HISTORY_FILE = 'posted_history.json'
 
 def load_history():
     if os.path.exists(HISTORY_FILE):
-        with open(HISTORY_FILE, 'r') as f:
-            return json.load(f)
+        try:
+            with open(HISTORY_FILE, 'r') as f:
+                return json.load(f)
+        except json.decoder.JSONDecodeError:
+            # If the file is empty or corrupted, return a fresh empty list
+            print("⚠️ Notice: posted_history.json was empty or corrupted. Starting fresh.")
+            return []
     return []
 
 def save_history(history):
