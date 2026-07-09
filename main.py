@@ -112,8 +112,8 @@ def main():
             posted_history.append(unique_post_id)
             save_history(posted_history)
             
-            # Tiny safety delay between the articles
-            time.sleep(5)
+            # Longer delay to prevent Google from triggering a 429 Rate Limit error
+            time.sleep(60)
             
         except HttpError as error:
             print(f"❌ Error posting to {target_blog}: {error}")
